@@ -8,6 +8,16 @@ def gen_expr_trees(n, u, i):
             yield [x] + y
 
 
+def expr_trees(n, u, i):
+    if i == n:
+        return [[]]
+    cnt = max(0, i + 1 - u)
+    s = []
+    for x in range(cnt if (i+1 == n) else 0, cnt + 1):
+        s.extend([[x] + y for y in expr_trees(n, u+x, i+1)])
+    return s
+
+
 def postfix_to_infix(pf):
     _P = {  # priority
         '+': 0,
@@ -30,7 +40,6 @@ def postfix_to_infix(pf):
         return s.format(a, b)
     s = []
     for c in pf:
-        print(s)
         if c not in _OPERATORS:
             s.append((c, ""))
             continue
@@ -38,13 +47,3 @@ def postfix_to_infix(pf):
         d = apply_op(a, b, c)
         s.append((d, c))
     return s.pop()[0]
-
-
-def expr_trees(n, u, i):
-    if i == n:
-        return [[]]
-    cnt = max(0, i + 1 - u)
-    s = []
-    for x in range(cnt if (i+1 == n) else 0, cnt + 1):
-        s.extend([[x] + y for y in g(n, u+x, i+1)])
-    return s
