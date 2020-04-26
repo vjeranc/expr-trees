@@ -2,6 +2,7 @@ from collections import namedtuple
 import itertools as it
 from multiprocessing import Process
 import time
+import mpmath as mp
 
 Op = namedtuple('Op', ['symbol', 'priority', 'associative'])
 
@@ -40,39 +41,60 @@ def all_assoc(ops):
     return all(op.associative for _, op in ops)
 
 
-def psfx(ls, ops):
+_MM = dict()
+
+
+def _psfx(ls, lops, rops, tree='l'):
+    # version with cache, variables should be put in with str.format function.
+    ops = lops if tree == 'l' else rops
+    if (len(ls), ops) in _MM:
+        return _MM[(len(ls), ops)]
+    if len(ls) == 1:
+        return ["{:}"]
+    r = []
+    for op in ops:
+        for i in range(1, len(ls)):
+            r1 = _psfx(ls[:i], lops, rops, tree='l')
+            r2 = _psfx(ls[i:], lops, rops, tree='r')
+            for a, b in it.product(r1, r2):
+                r.append(a + b + op)
+    _MM[(len(ls), ops)] = r
+    return r
+
+
+def psfx(ls, lops, rops=None):
+    rops = rops or lops
+    return [s.format(*ls) for s in _psfx(ls, lops, rops)]
+
+
+def pset(s):
+    n = len(s)
+    for r in range(1, n+1):
+        for c in it.combinations(s, r):
+            yield c
+
+
+def seq_cnts():
+    for op_set in pset("+-*/^"):
+        seq = []
+        for i in range(0, 9):
+            s = "123456789"[:i]
+            seq.append(str(len(infxR_to_psfx_map(len(s), op_set))))
+        print(''.join(list(op_set)), ' '.join(seq))
+
+
+def gen_psfx(ls, lops=None, rops=None, tree='l'):
+    rops = rops or lops
+    ops = lops if tree == 'l' else rops
     if len(ls) == 1:
         yield ls
         return
     for op in ops:
         for i in range(1, len(ls)):
-            r1 = psfx(ls[:i], ops)
-            r2 = psfx(ls[i:], ops)
+            r1 = gen_psfx(ls[:i], lops, rops, tree='l')
+            r2 = gen_psfx(ls[i:], lops, rops, tree='r')
             for a, b in it.product(r1, r2):
                 yield (a + b + op)
-
-
-def all_postfix(vars, ops_cnt):
-    if not vars:
-        return [""]
-    if all_same(ops_cnt) and ops_cnt[0][0].associative:
-        return [vars + (ops_cnt[0][0].symbol * (len(vars) - 1))]
-
-    res = []
-    for i, (op, cnt) in enumerate(ops_cnt):
-        last_op = op
-        remaining_ops = ops_cnt[:i] + ops_cnt[i+1:]
-        if cnt - 1 > 0:
-            remaining_ops.append((op, cnt - 1))
-        remaining_vars = vars[:-1]
-        res = []
-        for i, _ in enumerate(remaining_vars):
-            res1 = all_postfix(remaining_vars[:i], remaining_ops)
-            res2 = all_postfix(remaining_vars[i:], remaining_ops)
-            for t1, t2 in it.product(res1, res2):
-                res.append(t1 + t2 + vars[-1] + last_op.symbol)
-
-    return res
 
 
 def choose_sum(n, i, choices):
@@ -100,8 +122,8 @@ def eval_psfx(pf):
         '+': lambda x, y: x + y,
         '-': lambda x, y: x - y,
         '*': lambda x, y: x * y,
-        '/': lambda x, y: None if y == 0 else (x / y),
-        '^': lambda x, y: None if x == 0 and y < 0 else (x ** y)
+        '/': lambda x, y: x / y,
+        '^': lambda x, y: x ** y
     }
 
     def apply_op(at, bt, op):
@@ -109,11 +131,16 @@ def eval_psfx(pf):
         b, _ = bt
         if a is None or b is None:
             return None
-        return _OPERATORS[op](int(a), int(b))
+        try:
+            return _OPERATORS[op](a, b)
+        except Exception as e:
+            print(e)
+            return None
+
     s = []
     for c in pf:
         if c not in _OPERATORS:
-            s.append((c, ""))
+            s.append((mp.mpc(c), ""))
             continue
         b, a = s.pop(), s.pop()
         d = apply_op(a, b, c)
@@ -153,23 +180,31 @@ def postfix_to_infix(pf):
 
 
 def eval_f(k, pf_expr, goal_num):
-    r = eval_psfx(pf_expr)
-    s = "{:}"
-    if type(r) == float:
-        s = "{:.5f}"
-    s = ("{:40}|{:40}|{:4}").format(
-        k,
-        s.format(r)[:40],
-        r == goal_num
-    )
-    print(s)
+    print(k, eval_psfx(pf_expr))
 
 
 def chunker(seq, size):
     return (seq[pos:pos + size] for pos in range(0, len(seq), size))
 
 
+def infxR_to_psfx_map(n, ops):
+    s = "123456789"[:n]
+    m = dict()
+    for pf in psfx(s, ops):
+        infx = postfix_to_infix(pf)
+        ls = m.setdefault(infx, [])
+        ls.append(pf)
+    return m
+
+
 def eval_expr(n, goal):
+    m = infxR_to_psfx_map(n, "+-*/^")
+    for k, vs in m.items():
+        print(k, end=' ', flush=True)
+        print(eval_psfx(vs[-1]))
+
+
+def parallel_eval_expr(n, goal):
     s = "123456789"[:n]
     m = dict()
     for pf in psfx(s, "+-*/^"):
@@ -179,19 +214,36 @@ def eval_expr(n, goal):
 
     q = list(m.items())
     ps = [Process(target=eval_f, args=("", "12+", 3))] * 100
+    pm = dict()
+    too_long = []
     while q:
         nps, aps = [], []
         for p in ps:
             if p.is_alive():
+                if (time.time() - pm[p][1]) > 10:
+                    p.kill()
+                    nps.append(p)
+                    too_long.append(pm[p][2])
+                    del pm[p]
+                    continue
                 aps.append(p)
             else:
                 nps.append(p)
-        for _ in nps:
+        for p in nps:
+            try:
+                p.close()
+            except Exception:
+                aps.append(p)
+                continue
             k, vs = q.pop()
             p = Process(target=eval_f, args=(k, vs[-1], goal))
             p.start()
+            pm[p] = (p, time.time(), k)
             aps.append(p)
             if not q:
                 break
         ps = aps
         time.sleep(0.01)
+
+    for tl in too_long:
+        print(tl)
