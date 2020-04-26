@@ -73,6 +73,27 @@ def _left_tree_ops(cur_op, all_ops):
     )
 
 
+def td_psfx_cnt(n, all_ops):
+    m = dict()
+
+    def recur(n, ops):
+        if n == 1:
+            return 1
+        if (n, ops) in m:
+            return m[(n, ops)]
+        r = 0
+        for op in ops:
+            lops = _left_tree_ops(op, all_ops)
+            rops = all_ops
+            for i in range(1, n):
+                r1 = recur(i, lops)
+                r2 = recur(n-i, rops)
+                r += r1 * r2
+        m[(n, ops)] = r
+        return r
+    return recur(n, all_ops)
+
+
 def td_psfx(vs, all_ops):
     def recur(ls, ops):
         if len(ls) == 1:
@@ -87,6 +108,22 @@ def td_psfx(vs, all_ops):
                 for a, b in it.product(r1, r2):
                     r.append(a + b + op)
         return r
+    return recur(vs, all_ops)
+
+
+def gen_td_psfx(vs, all_ops):
+    def recur(ls, ops):
+        if len(ls) == 1:
+            yield ls
+            return
+        for op in ops:
+            lops = _left_tree_ops(op, all_ops)
+            rops = all_ops
+            for i in range(1, len(ls)):
+                r1 = recur(ls[:i], lops)
+                r2 = recur(ls[i:], rops)
+                for a, b in it.product(r1, r2):
+                    yield a + b + op
     return recur(vs, all_ops)
 
 
@@ -196,8 +233,8 @@ def postfix_to_infix(pf):
     return s.pop()[0]
 
 
-def eval_f(k, pf_expr, goal_num):
-    print(k, eval_psfx(pf_expr))
+def eval_f(pf_expr):
+    print(postfix_to_infix(pf_expr), eval_psfx(pf_expr))
 
 
 def chunker(seq, size):
@@ -222,17 +259,12 @@ def eval_expr(n, goal):
 
 def parallel_eval_expr(n, goal):
     s = "123456789"[:n]
-    m = dict()
-    for pf in psfx(s, "+-*/^"):
-        infx = postfix_to_infix(pf)
-        ls = m.setdefault(infx, [])
-        ls.append(pf)
-
-    q = list(m.items())
+    q = gen_td_psfx(s, "+-*/^")
     ps = [Process(target=eval_f, args=("", "12+", 3))] * 100
     pm = dict()
     too_long = []
-    while q:
+    no_more = False
+    while not no_more:
         nps, aps = [], []
         for p in ps:
             if p.is_alive():
@@ -251,8 +283,12 @@ def parallel_eval_expr(n, goal):
             except Exception:
                 aps.append(p)
                 continue
-            k, vs = q.pop()
-            p = Process(target=eval_f, args=(k, vs[-1], goal))
+            try:
+                k = next(q)
+            except StopIteration:
+                no_more = True
+                break
+            p = Process(target=eval_f, args=(k, ))
             p.start()
             pm[p] = (p, time.time(), k)
             aps.append(p)
