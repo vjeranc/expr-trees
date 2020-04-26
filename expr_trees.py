@@ -41,24 +41,17 @@ def all_assoc(ops):
     return all(op.associative for _, op in ops)
 
 
-def _psfx(ls, lops, rops, tree='l'):
-    # version with cache, variables should be put in with str.format function.
-    ops = lops if tree == 'l' else rops
+def psfx(ls, ops):
     if len(ls) == 1:
-        return ["{:}"]
+        return ls
     r = []
     for op in ops:
         for i in range(1, len(ls)):
-            r1 = _psfx(ls[:i], lops, rops, tree='l')
-            r2 = _psfx(ls[i:], lops, rops, tree='r')
+            r1 = psfx(ls[:i], ops)
+            r2 = psfx(ls[i:], ops)
             for a, b in it.product(r1, r2):
                 r.append(a + b + op)
     return r
-
-
-def psfx(ls, lops, rops=None):
-    rops = rops or lops
-    return (s.format(*ls) for s in _psfx(ls, lops, rops))
 
 
 _P = {  # priority
@@ -69,7 +62,7 @@ _P = {  # priority
     '^': 2
 }
 _ASSOC = set("+*")
-_OPERATORS = set(['+', '-', '*', '/', '^', ])
+_OPERATORS = set("+-*/^")
 
 
 def _left_tree_ops(cur_op, all_ops):
@@ -83,7 +76,7 @@ def _left_tree_ops(cur_op, all_ops):
 def td_psfx(vs, all_ops):
     def recur(ls, ops):
         if len(ls) == 1:
-            return ["{:}"]
+            return ls
         r = []
         for op in ops:
             lops = _left_tree_ops(op, all_ops)
@@ -94,7 +87,7 @@ def td_psfx(vs, all_ops):
                 for a, b in it.product(r1, r2):
                     r.append(a + b + op)
         return r
-    return (s.format(*vs) for s in recur(vs, all_ops))
+    return recur(vs, all_ops)
 
 
 def pset(s):
