@@ -41,14 +41,9 @@ def all_assoc(ops):
     return all(op.associative for _, op in ops)
 
 
-_MM = dict()
-
-
 def _psfx(ls, lops, rops, tree='l'):
     # version with cache, variables should be put in with str.format function.
     ops = lops if tree == 'l' else rops
-    if (len(ls), ops) in _MM:
-        return _MM[(len(ls), ops)]
     if len(ls) == 1:
         return ["{:}"]
     r = []
@@ -58,13 +53,48 @@ def _psfx(ls, lops, rops, tree='l'):
             r2 = _psfx(ls[i:], lops, rops, tree='r')
             for a, b in it.product(r1, r2):
                 r.append(a + b + op)
-    _MM[(len(ls), ops)] = r
     return r
 
 
 def psfx(ls, lops, rops=None):
     rops = rops or lops
-    return [s.format(*ls) for s in _psfx(ls, lops, rops)]
+    return (s.format(*ls) for s in _psfx(ls, lops, rops))
+
+
+_P = {  # priority
+    '+': 0,
+    '-': 0,
+    '*': 1,
+    '/': 1,
+    '^': 2
+}
+_ASSOC = set("+*")
+_OPERATORS = set(['+', '-', '*', '/', '^', ])
+
+
+def _left_tree_ops(cur_op, all_ops):
+    pp = _P[cur_op]
+    return ''.join(
+        op for op in all_ops
+        if _P[op] < pp or _P[op] > pp or op not in _ASSOC
+    )
+
+
+def td_psfx(vs, all_ops):
+    def recur(ls, ops):
+        if len(ls) == 1:
+            return ["{:}"]
+        r = []
+        for op in ops:
+            lops = _left_tree_ops(op, all_ops)
+            rops = all_ops
+            for i in range(1, len(ls)):
+                r1 = recur(ls[:i], lops)
+                r2 = recur(ls[i:], rops)
+                for a, b in it.product(r1, r2):
+                    r.append(a + b + op)
+        return r
+    return (s.format(*vs) for s in recur(vs, all_ops))
 
 
 def pset(s):
@@ -79,7 +109,7 @@ def seq_cnts():
         seq = []
         for i in range(0, 9):
             s = "123456789"[:i]
-            seq.append(str(len(infxR_to_psfx_map(len(s), op_set))))
+            seq.append(str(sum(1 for _ in td_psfx(s, op_set))))
         print(''.join(list(op_set)), ' '.join(seq))
 
 
@@ -148,33 +178,27 @@ def eval_psfx(pf):
     return s.pop()[0]
 
 
-def postfix_to_infix(pf):
-    _P = {  # priority
-        '+': 0,
-        '-': 0,
-        '*': 1,
-        '/': 1,
-        '^': 2
-    }
-    _ASSOC = "+*"
-    _OPERATORS = set(['+', '-', '*', '/', '^', ])
+def _apply_op(at, bt, op):
+    a, op1 = at
+    b, op2 = bt
+    left_b = len(a) > 1 and _P[op1] < _P[op]
+    right_b = len(b) > 1 and (
+        _P[op2] < _P[op] or
+        _P[op2] == _P[op] and op not in _ASSOC)
+    s = " " + op + " "
+    s = ("({:})" if left_b else "{:}") + s
+    s = s + ("({:})" if right_b else "{:}")
+    return s.format(a, b)
 
-    def apply_op(at, bt, op):
-        a, op1 = at
-        b, op2 = bt
-        left_b = len(a) > 1 and _P[op1] < _P[op]
-        right_b = len(b) > 1 and (_P[op2] < _P[op] or op not in _ASSOC)
-        s = " " + op + " "
-        s = ("({:})" if left_b else "{:}") + s
-        s = s + ("({:})" if right_b else "{:}")
-        return s.format(a, b)
+
+def postfix_to_infix(pf):
     s = []
     for c in pf:
         if c not in _OPERATORS:
             s.append((c, ""))
             continue
         b, a = s.pop(), s.pop()
-        d = apply_op(a, b, c)
+        d = _apply_op(a, b, c)
         s.append((d, c))
     return s.pop()[0]
 
@@ -187,10 +211,9 @@ def chunker(seq, size):
     return (seq[pos:pos + size] for pos in range(0, len(seq), size))
 
 
-def infxR_to_psfx_map(n, ops):
-    s = "123456789"[:n]
+def infxR_to_psfx_map(pfs):
     m = dict()
-    for pf in psfx(s, ops):
+    for pf in pfs:
         infx = postfix_to_infix(pf)
         ls = m.setdefault(infx, [])
         ls.append(pf)
