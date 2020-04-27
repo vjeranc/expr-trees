@@ -301,12 +301,12 @@ def parallel_eval_expr(n, ops, goal, timeout=5, proc_cnt=5):
                 if status == "DONE":
                     continue
                 start_t = start_time_mem[i]
-                cur_idx = cur_idx[i]
+                idx = cur_idx[i]
                 if (cur_t - start_t) > timeout:
                     p.kill()
-                    if cur_idx < 0:
+                    if idx < 0:
                         continue
-                    res[cur_idx] = -1
+                    res[idx] = -1
 
             for i, p in enumerate(processes):
                 if p is not None and p.is_alive():
@@ -341,13 +341,14 @@ def parallel_eval_expr(n, ops, goal, timeout=5, proc_cnt=5):
                           len(tq), q_type)
                 )
                 processes[i].start()
-        except Exception as e:
-            print(e)
+        except Exception:
+            import traceback
+            traceback.print_exc()
 
         cur_t = time.time()
         time.sleep(max(1, timeout - 1))
         print("Status: {:}|Found: {:d}".format(' '.join(
-                status_mem[i] + " " + str(r)
+                status_mem[i][0] + " " + str(r)
                 for (r, i) in zip(restarts, range(proc_cnt))
             ), np.sum(res > 0))
         )
