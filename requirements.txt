@@ -2,3 +2,4 @@ mpmath
 flake8
 ipython
 autopep8
+numpy
