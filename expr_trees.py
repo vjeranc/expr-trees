@@ -172,7 +172,7 @@ def choose_sum(n, i, choices):
     return s
 
 
-def eval_psfx(pf):
+def _eval_psfx(pf, init):
     _OPERATORS = {
         '+': lambda x, y: x + y,
         '-': lambda x, y: x - y,
@@ -194,12 +194,20 @@ def eval_psfx(pf):
     s = []
     for c in pf:
         if c not in _OPERATORS:
-            s.append((mp.mpc(c), ""))
+            s.append((init(c), ""))
             continue
         b, a = s.pop(), s.pop()
         d = apply_op(a, b, c)
         s.append((d, c))
     return s.pop()[0]
+
+
+def eval_psfx(pf):
+    return _eval_psfx(pf, mp.mpc)
+
+
+def float_eval_psfx(pf):
+    return _eval_psfx(pf, np.float_)
 
 
 def postfix_to_infix(pf):
@@ -242,26 +250,35 @@ class ProcStatus:
     CALC = 1
     DONE = 2
 
+    def p(s):
+        for name in dir(ProcStatus):
+            if getattr(ProcStatus, name) == s:
+                return name
+        return "UNKNOWN"
+
+
+def access_mem(name, dtype, sz=None):
+    shared_mem = shared_memory.SharedMemory(name=name)
+    sz = (len(shared_mem.buf) // np.dtype(dtype).itemsize) if not sz else sz
+    # shared_mem has to be returned otherwise the memory is unusable
+    return shared_mem, np.ndarray(sz, dtype=dtype, buffer=shared_mem.buf)
+
 
 def eval_f(task_mem_name, res_mem_name, status_mem_name, start_time_mem_name,
            cur_idx_mem_name,
            status_idx, start_idx, end_idx, goal,
            arr_dim, arr_dtype):
-    goal = mp.mpc(goal)
-
-    pfs_mem = shared_memory.SharedMemory(name=task_mem_name)
-    pfs = np.ndarray(arr_dim, dtype=arr_dtype, buffer=pfs_mem.buf)
-    res_mem = shared_memory.SharedMemory(name=res_mem_name)
-    res = np.ndarray(len(res_mem.buf), dtype=np.int8, buffer=res_mem.buf)
-    status = shared_memory.ShareableList(name=status_mem_name)
-    start_time = shared_memory.ShareableList(name=start_time_mem_name)
-    cur_idx_mem = shared_memory.SharedMemory(name=cur_idx_mem_name)
-    cur_idx = np.ndarray(
-        len(cur_idx_mem.buf)//8, dtype=np.int64, buffer=cur_idx_mem.buf)
+    # print("ID {:}: {:}-{:}".format(status_idx, start_idx, end_idx))
+    # goal = mp.mpc(goal)
+    _m1, pfs = access_mem(task_mem_name, arr_dtype, arr_dim)
+    _m2, res = access_mem(res_mem_name, np.int8)
+    _m3, status = access_mem(status_mem_name, np.int64)
+    _m4, start_time = access_mem(start_time_mem_name, np.float_)
+    _m5, cur_idx = access_mem(cur_idx_mem_name, np.int64)
     status[status_idx] = ProcStatus.ACQMEM
     for i in range(start_idx, end_idx):
+        start_time[status_idx] = np.float(time.time())
         status[status_idx] = ProcStatus.CALC
-        start_time[status_idx] = time.time()
         cur_idx[status_idx] = i
         res[i] = -1
         r = eval_psfx(pfs[i].decode('ascii'))
@@ -269,58 +286,79 @@ def eval_f(task_mem_name, res_mem_name, status_mem_name, start_time_mem_name,
     status[status_idx] = ProcStatus.DONE
 
 
-def parallel_eval_expr(n, ops, goal, timeout=5, proc_cnt=5):
+def calc_task_ranges(proc_cnt, tasks):
+    task_cnt = len(tasks)
+    block_size = task_cnt // proc_cnt
+    tr = [[i * block_size, (i + 1) * block_size] for i in range(proc_cnt)]
+    tr[-1][1] = task_cnt
+    return [tuple(r) for r in tr]
+
+
+def make_tasks(n, ops):
     s = "123456789"[:n]
     q_type = np.dtype('a' + str(2*len(s)))
     q = np.array(td_psfx(s, ops), dtype=q_type)
-    q.sort()
-    task_cnt = len(q)
-    task_block_size = task_cnt // proc_cnt
+    # q.sort()
+    np.random.shuffle(q)
+    return q, q_type
 
-    task_ranges = []
-    for i in range(proc_cnt):
-        start_idx = i * task_block_size
-        end_idx = (i + 1) * task_block_size if i + 1 != proc_cnt else task_cnt
-        task_ranges.append((start_idx, end_idx))
+
+def print_status(res, status, cur_idx, restarts, proc_cnt):
+    print("Status: {:}|Found: {:d}|Progress: {:d}/{:d}".format(
+        ' '.join(
+            "{:}{:}".format(ProcStatus.p(status[i]), r)
+            for (r, i) in zip(restarts, range(proc_cnt))
+        ),
+        np.sum(res > 0),
+        np.sum(res != -2),
+        len(res))
+    )
+
+
+def make_shared_mem(smm, sz, dtype):
+    shared_mem = smm.SharedMemory(size=sz * np.dtype(dtype).itemsize)
+    shared = np.ndarray(sz, dtype=dtype, buffer=shared_mem.buf)
+    # shared_mem has to be returned otherwise the memory is unusable
+    return shared_mem, shared
+
+
+def parallel_eval_expr(n, ops, goal, timeout=1, proc_cnt=16):
+    q, q_type = make_tasks(n, ops)
+    task_cnt = len(q)
+    task_ranges = calc_task_ranges(proc_cnt, q)
     smm = SharedMemoryManager()
     smm.start()
-    task_mem = smm.SharedMemory(size=q.nbytes)
-    tq = np.ndarray(len(q), dtype=q_type, buffer=task_mem.buf)
+    task_mem, tq = make_shared_mem(smm, task_cnt, q_type)
     tq[:] = q[:]
     del q
-    res_mem = smm.SharedMemory(size=len(tq))
-    res = np.ndarray(len(tq), dtype=np.int8, buffer=res_mem.buf)
-    start_time_mem = smm.ShareableList([0.] * proc_cnt)
-    status_mem = smm.ShareableList([ProcStatus.IDLE] * proc_cnt)
-    cur_idx_mem = smm.SharedMemory(size=proc_cnt * 8)
-    cur_idx = np.ndarray(proc_cnt, dtype=np.int64, buffer=cur_idx_mem.buf)
+    res_mem, res = make_shared_mem(smm, task_cnt, np.int8)
+    res[:] = -2  # initial value indicating that result is not being calculated
+    start_time_mem, start_time = make_shared_mem(smm, proc_cnt, np.float_)
+    status_mem, status = make_shared_mem(smm, proc_cnt, np.int64)
+    status[:] = ProcStatus.IDLE
+    cur_idx_mem, cur_idx = make_shared_mem(smm, proc_cnt, np.int64)
+    cur_idx[:] = -1
     processes = [None] * proc_cnt
     restarts = [0] * proc_cnt
     cur_t = time.time()
-    while not all(status_mem[i] == ProcStatus.DONE for i in range(proc_cnt)):
+    while not all(status[i] == ProcStatus.DONE for i in range(proc_cnt)):
+        print_status(res, status, cur_idx, restarts, proc_cnt)
         try:
             for i, p in enumerate(processes):
                 if p is None:
                     continue
-                status = status_mem[i]
-                if status == ProcStatus.DONE:
+                if status[i] == ProcStatus.DONE:
                     continue
-                start_t = start_time_mem[i]
-                idx = cur_idx[i]
-                if (cur_t - start_t) > timeout:
+                if (cur_t - start_time[i]) > timeout:
                     p.kill()
-                    if idx < 0:
+                    if cur_idx[i] < 0:
                         continue
-                    res[idx] = -1
+                    res[cur_idx[i]] = -1
 
             for i, p in enumerate(processes):
                 if p is not None and p.is_alive():
                     continue
-                start_t = start_time_mem[i]
-                status = status_mem[i]
-                idx = cur_idx[i]
-                end_idx = task_ranges[i][1]
-                if status == ProcStatus.DONE:
+                if status[i] == ProcStatus.DONE:
                     try:
                         p.close()
                     except Exception:
@@ -331,19 +369,23 @@ def parallel_eval_expr(n, ops, goal, timeout=5, proc_cnt=5):
                     p.close()
                 except Exception:
                     pass
+                is_new_proc = cur_idx[i] == -1
+                idx = task_ranges[i][0] if is_new_proc else cur_idx[i]
+                end_idx = task_ranges[i][1]
                 restarts[i] += 1
                 processes[i] = Process(
                     target=eval_f,
                     args=(task_mem.name,
                           res_mem.name,
-                          status_mem.shm.name,
-                          start_time_mem.shm.name,
+                          status_mem.name,
+                          start_time_mem.name,
                           cur_idx_mem.name,
                           i,
-                          idx + 1,  # skipping the one that takes too long
+                          # skipping the one that takes too long
+                          idx + (0 if is_new_proc else 1),
                           end_idx,
                           goal,
-                          len(tq), q_type)
+                          task_cnt, q_type)
                 )
                 processes[i].start()
         except Exception:
@@ -351,12 +393,9 @@ def parallel_eval_expr(n, ops, goal, timeout=5, proc_cnt=5):
             traceback.print_exc()
 
         cur_t = time.time()
-        time.sleep(max(1, timeout - 1))
-        print("Status: {:}|Found: {:d}".format(' '.join(
-                status_mem[i][0] + " " + str(r)
-                for (r, i) in zip(restarts, range(proc_cnt))
-            ), np.sum(res > 0))
-        )
+        time.sleep(timeout)
+
+    print_status(res, status, cur_idx, restarts, proc_cnt)
 
     for p in processes:
         if p is None:
@@ -364,14 +403,8 @@ def parallel_eval_expr(n, ops, goal, timeout=5, proc_cnt=5):
         p.join()
         p.close()
 
-    for i, pf in enumerate(tq):
+    for pf in tq[np.argwhere(res == 1)].flatten():
         pf = pf.decode('ascii')
-        m = res[i]
-        if m == -1:
-            print("TLE", pf)
-            continue
-        if m == 0:
-            continue
         print(eval_psfx(pf), '==', postfix_to_infix(pf), pf)
 
     smm.shutdown()
