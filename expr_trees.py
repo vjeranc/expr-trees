@@ -68,12 +68,24 @@ _ASSOC = set([op.symbol for op in _OPS if op.associative])
 _OPERATORS = set([op.symbol for op in _OPS])
 
 
+def bracket_condition(op1, op):
+    # Consider expression ((a op1 b) op c):
+    # If op1 is of lower priority than op then brackets need to stay. If the
+    # priority is equal then brackets need to stay if op is not associative.
+    # Otherwise brackets are unnecessary.
+    return _P[op1] < _P[op] or _P[op1] == _P[op] and op not in _ASSOC
+
+
+def make_reduced_tree_ops(all_ops):
+    return dict((cur_op, ''.join(
+        op for op in all_ops
+        if bracket_condition(op, cur_op)
+    )) for cur_op in all_ops)
+
+
 def td_psfx_cnt(n, all_ops):
     m = dict()
-    reduced_tree_ops = dict((cur_op, ''.join(
-        op for op in all_ops
-        if _P[op] < _P[cur_op] or _P[op] > _P[cur_op] or op not in _ASSOC
-    )) for cur_op in all_ops)
+    reduced_tree_ops = make_reduced_tree_ops(all_ops)
 
     def recur(n, ops):
         if n == 1:
@@ -82,11 +94,9 @@ def td_psfx_cnt(n, all_ops):
             return m[(n, ops)]
         r = 0
         for op in ops:
-            lops = reduced_tree_ops[op]
-            rops = all_ops
             for i in range(1, n):
-                r1 = recur(i, lops)
-                r2 = recur(n-i, rops)
+                r1 = recur(i, reduced_tree_ops[op])
+                r2 = recur(n-i, all_ops)
                 r += r1 * r2
         m[(n, ops)] = r
         return r
@@ -94,21 +104,16 @@ def td_psfx_cnt(n, all_ops):
 
 
 def td_psfx(vs, all_ops):
-    reduced_tree_ops = dict((cur_op, ''.join(
-        op for op in all_ops
-        if _P[op] < _P[cur_op] or _P[op] > _P[cur_op] or op not in _ASSOC
-    )) for cur_op in all_ops)
+    reduced_tree_ops = make_reduced_tree_ops(all_ops)
 
     def recur(ls, ops):
         if len(ls) == 1:
             return ls
         r = []
         for op in ops:
-            lops = reduced_tree_ops[op]
-            rops = all_ops
             for i in range(1, len(ls)):
-                r1 = recur(ls[:i], lops)
-                r2 = recur(ls[i:], rops)
+                r1 = recur(ls[:i], reduced_tree_ops[op])
+                r2 = recur(ls[i:], all_ops)
                 for a, b in it.product(r1, r2):
                     r.append(a + b + op)
         return r
@@ -116,21 +121,16 @@ def td_psfx(vs, all_ops):
 
 
 def gen_td_psfx(vs, all_ops):
-    reduced_tree_ops = dict((cur_op, ''.join(
-        op for op in all_ops
-        if _P[op] < _P[cur_op] or _P[op] > _P[cur_op] or op not in _ASSOC
-    )) for cur_op in all_ops)
+    reduced_tree_ops = make_reduced_tree_ops(all_ops)
 
     def recur(ls, ops):
         if len(ls) == 1:
             yield ls
             return
         for op in ops:
-            lops = reduced_tree_ops[op]
-            rops = all_ops
             for i in range(1, len(ls)):
-                r1 = recur(ls[:i], lops)
-                r2 = recur(ls[i:], rops)
+                r1 = recur(ls[:i], reduced_tree_ops[op])
+                r2 = recur(ls[i:], all_ops)
                 for a, b in it.product(r1, r2):
                     yield a + b + op
     return recur(vs, all_ops)
@@ -206,10 +206,8 @@ def postfix_to_infix(pf):
     def _apply_op(at, bt, op):
         a, op1 = at
         b, op2 = bt
-        left_b = len(a) > 1 and _P[op1] < _P[op]
-        right_b = len(b) > 1 and (
-            _P[op2] < _P[op] or
-            _P[op2] == _P[op] and op not in _ASSOC)
+        left_b = len(a) > 1 and bracket_condition(op1, op)
+        right_b = len(b) > 1 and bracket_condition(op2, op)
         s = " " + op + " "
         s = ("({:})" if left_b else "{:}") + s
         s = s + ("({:})" if right_b else "{:}")
@@ -238,6 +236,13 @@ def infxR_to_psfx_map(pfs):
     return m
 
 
+class ProcStatus:
+    IDLE = -1
+    ACQMEM = 0
+    CALC = 1
+    DONE = 2
+
+
 def eval_f(task_mem_name, res_mem_name, status_mem_name, start_time_mem_name,
            cur_idx_mem_name,
            status_idx, start_idx, end_idx, goal,
@@ -253,15 +258,15 @@ def eval_f(task_mem_name, res_mem_name, status_mem_name, start_time_mem_name,
     cur_idx_mem = shared_memory.SharedMemory(name=cur_idx_mem_name)
     cur_idx = np.ndarray(
         len(cur_idx_mem.buf)//8, dtype=np.int64, buffer=cur_idx_mem.buf)
-    status[status_idx] = "ACQMEM"
+    status[status_idx] = ProcStatus.ACQMEM
     for i in range(start_idx, end_idx):
-        status[status_idx] = "CALC"
+        status[status_idx] = ProcStatus.CALC
         start_time[status_idx] = time.time()
         cur_idx[status_idx] = i
         res[i] = -1
         r = eval_psfx(pfs[i].decode('ascii'))
         res[i] = r == goal
-    status[status_idx] = "DONE"
+    status[status_idx] = ProcStatus.DONE
 
 
 def parallel_eval_expr(n, ops, goal, timeout=5, proc_cnt=5):
@@ -286,19 +291,19 @@ def parallel_eval_expr(n, ops, goal, timeout=5, proc_cnt=5):
     res_mem = smm.SharedMemory(size=len(tq))
     res = np.ndarray(len(tq), dtype=np.int8, buffer=res_mem.buf)
     start_time_mem = smm.ShareableList([0.] * proc_cnt)
-    status_mem = smm.ShareableList(["IDLE"] * proc_cnt)
+    status_mem = smm.ShareableList([ProcStatus.IDLE] * proc_cnt)
     cur_idx_mem = smm.SharedMemory(size=proc_cnt * 8)
     cur_idx = np.ndarray(proc_cnt, dtype=np.int64, buffer=cur_idx_mem.buf)
     processes = [None] * proc_cnt
     restarts = [0] * proc_cnt
     cur_t = time.time()
-    while not all(status_mem[i] == "DONE" for i in range(proc_cnt)):
+    while not all(status_mem[i] == ProcStatus.DONE for i in range(proc_cnt)):
         try:
             for i, p in enumerate(processes):
                 if p is None:
                     continue
                 status = status_mem[i]
-                if status == "DONE":
+                if status == ProcStatus.DONE:
                     continue
                 start_t = start_time_mem[i]
                 idx = cur_idx[i]
@@ -315,7 +320,7 @@ def parallel_eval_expr(n, ops, goal, timeout=5, proc_cnt=5):
                 status = status_mem[i]
                 idx = cur_idx[i]
                 end_idx = task_ranges[i][1]
-                if status == "DONE":
+                if status == ProcStatus.DONE:
                     try:
                         p.close()
                     except Exception:
