@@ -1,5 +1,9 @@
 # expr-trees
 
+Copyright (C) 2026 Vjeran Crnjak
+
+License: GPL-3.0-only
+
 ## Scope
 
 This repo checks numbers from TAOCP 4A, answers to exercises 122 and 123.
