@@ -1,0 +1,5 @@
+-r requirements.txt
+pyright
+flake8
+ipython
+autopep8
