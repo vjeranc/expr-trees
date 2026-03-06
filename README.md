@@ -4,6 +4,12 @@ Copyright (C) 2026 Vjeran Crnjak
 
 License: GPL-3.0-only
 
+## Toolchain
+
+Tested locally on Arch Linux with:
+- `gcc 15.2.1+r447+g6a64f6c3ebb8-1`
+- `boost 1.89.0-4`
+
 ## Scope
 
 This repo checks numbers from TAOCP 4A, answers to exercises 122 and 123.
