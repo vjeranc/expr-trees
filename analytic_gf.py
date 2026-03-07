@@ -6,8 +6,9 @@ them with SymPy.
 Rules:
 - union -> +
 - concatenation -> *
+- size means "number of digits used"
 - only digits contribute size, so each digit contributes z
-- operators and parentheses contribute size 1
+- operators, decimal points, and parentheses contribute size 0
 """
 
 from __future__ import annotations
