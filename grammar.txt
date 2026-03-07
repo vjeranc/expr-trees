@@ -1,0 +1,23 @@
+this is the grammar:
+
+expr -> <number> | <sum> | <product> | <quotient>
+<sum> -> <term> + <term> | <term> - <term> | <sum> + <term> | <sum> - <term>
+<term> -> <number> | <product> | <quotient>
+<product> -> <factor> x <factor> | <product> x <factor> | (<quotient>) x <factor>
+<quotient> -> <factor> / <factor> | <product> / <factor> | (<quotient>) / <factor>
+<factor> -> <number> | (<sum>)
+<number> -> <digit>
+
+so we see how brackets are carefully placed
+
+(b) extends number with:
+<number> -> <digit> | <number><digit>
+
+(c) extends number with (Knuth errata):
+<number> -> <digit string> | .<digit string> | <digit string>.<digit string>
+<digit string> -> <digit> | <digit string><digit>
+
+errata note (TAOCP 4A, answer 122(c), 24.01.08):
+cases = 9,875,514,240
+solutions = 137,375
+reduced cases considered = 586,220,150 (was 739,361,319)
