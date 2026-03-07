@@ -16,9 +16,12 @@ This repo checks numbers from TAOCP 4A, answers to exercises 122 and 123.
 
 Main files:
 - `fast_target_counter.cpp`: fast target counter.
-- `reachable_integers.cpp`: counts all reachable integers.
+- `representable_integers.cpp`: counts all reachable integers.
 - `shape_count.cpp`: counts grammar shapes.
 - `analytic_gf.py`: counts grammar shapes much faster, directly from grammar def.
+- `openmp_bruteforce_representable.cpp`: exhaustive OpenMP evaluator over the precedence grammar.
+- `openmp_catalan_representable.cpp`: exhaustive OpenMP evaluator over all binary parenthesizations.
+- `openmp_bruteforce_witnesses.cpp`: exhaustive OpenMP evaluator that writes one shortest witness per reachable integer.
 
 ## Results
 
@@ -45,12 +48,14 @@ Confirmed counts of representable integers:
 - 123(c): we get `218438`
 
 There is still an off by one in representable integers.
-[errata](https://www-cs-faculty.stanford.edu/~knuth/err4a.tex) says `218439`. I
-ran my slow programs and this fast checked-in program and I got 218438. Might
-be some grammar tweak. DEK's fascicle had off-by-one errors (1640, 3365) and I
-had code that reproduced that as well. I tried extending to --max-abs
-1000000000000 thinking that pruning is flaky but 1640 and 3365 are achieved by
-slightly misinterpreting the grammar.
+[errata](https://www-cs-faculty.stanford.edu/~knuth/err4a.tex) says `218439`.
+Three independent exhaustive programs gave `218438`:
+- `representable_integers.cpp`
+- `openmp_bruteforce_representable.cpp`
+- `openmp_catalan_representable.cpp`
+
+The unrestricted Catalan program traversed exactly
+`F_9 = 74,323,639,466` formal expressions and still gave `218438`.
 
 Old fascicle numbers are reproduced.
 Examples: `14786` for old 123(c), and the
@@ -86,6 +91,18 @@ example, `1-(2-3)` is the same as `1-2+3`. Also `7/(8*9)` is the same as
 `fast_target_counter.cpp` runs on 122(c), target `100`, in about `28s` on an
 AMD Ryzen 5 5600X with `4x32 GiB G.Skill F4-3200C14-32GTRG @ 3200 MT/s`, built
 with `g++ (GCC) 15.2.1`.
+
+The OpenMP exhaustive checkers keep little state in memory: no global witness
+tables, no expression strings in the count-only runs, and only thread-local
+integer sets/maps that are merged at the end.
+
+Observed runtimes on the same machine:
+- `openmp_bruteforce_representable.cpp`, 123(c), errata grammar, 12 threads:
+  about `65s`
+- `openmp_bruteforce_witnesses.cpp`, same search plus shortest witnesses:
+  `189.111s`
+- `openmp_catalan_representable.cpp`, unrestricted `F_9 = 74,323,639,466`
+  parenthesizations, 12 threads: about `10-11 min`
 
 DEK likely has a better algorithm.
 [errata](https://www-cs-faculty.stanford.edu/~knuth/err4a.tex) is from 2008,
@@ -137,6 +154,7 @@ and then:
 - `closed <expression>(z) = (3*z^2 - 6*z - sqrt(17*z^4 - 68*z^3 + 82*z^2 - 28*z + 1) + 1) / (4*(z - 1)^2)`
 - `n=9 gf_count=9875514250 comb_count=9875514250`
 
+
 This is `10` more than DEK's amended `9,875,514,240`.
 The likely reason: the symbolic grammar count includes all `10` top-level
 `<number>` expressions that use all nine digits and no operator: `.123456789`,
@@ -145,6 +163,16 @@ to exclude these trivial no-operator cases.
 I believe there are also libraries which will spit out efficient lexicographic
 enumeration algorithms as well. But when it comes to the actual problem of
 exercise 122, enumeration is not a fast approach.
+
+Script also prints the unrestricted binary-parenthesization model
+
+- `F(z) = <number>(z) + 4*F(z)^2`
+
+which yields
+
+- `n=9 gf_count=74323639466 comb_count=74323639466`
+
+easy to predict total runtime of bruteforce.
 
 ## Notes
 

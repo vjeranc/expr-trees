@@ -3,3 +3,4 @@ pyright
 flake8
 ipython
 autopep8
+yapf

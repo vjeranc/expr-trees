@@ -170,6 +170,10 @@ struct Ctx {
 	bool side_prune_feasible;
 	long long max_abs;
 	int sideA, sideB;
+	unsigned long long atom_set_failures= 0;
+	unsigned long long atom_cap_rejections= 0;
+	unsigned long long combine_set_failures= 0;
+	unsigned long long combine_cap_rejections= 0;
 	vector<array<vector<Frac>, NTN>> values;
 	vector<array<boost::unordered_flat_set<Frac, FracHash>, NTN>> value_sets;
 	vector<array<char, NTN>> built;
@@ -197,28 +201,51 @@ struct Ctx {
 		return p;
 	}
 
-	vector<Frac> gen_atoms(int i, int j) const {
+	vector<Frac> gen_atoms(int i, int j) {
 		vector<Frac> out;
 		int L= j - i;
 		if(mode == 'a') {
 			if(L == 1) {
 				Frac f;
-				f.set(i + 1, 1);
-				if(in_cap(f, max_abs)) out.push_back(f);
+				if(f.set(i + 1, 1)) {
+					if(in_cap(f, max_abs)) out.push_back(f);
+					else
+						atom_cap_rejections++;
+				} else {
+					atom_set_failures++;
+				}
 			}
 			return out;
 		}
 		long long v= token_value(i, j);
 		Frac f;
-		if(f.set(v, 1) && in_cap(f, max_abs)) out.push_back(f);
+		if(f.set(v, 1)) {
+			if(in_cap(f, max_abs)) out.push_back(f);
+			else
+				atom_cap_rejections++;
+		} else {
+			atom_set_failures++;
+		}
 		if(mode == 'c') {
 			if(c_old) {
 				Frac g;
-				if(g.set(v, pow10ll(L)) && in_cap(g, max_abs)) out.push_back(g);
+				if(g.set(v, pow10ll(L))) {
+					if(in_cap(g, max_abs)) out.push_back(g);
+					else
+						atom_cap_rejections++;
+				} else {
+					atom_set_failures++;
+				}
 			} else {
 				for(int t= 1; t <= L; t++) {
 					Frac g;
-					if(g.set(v, pow10ll(t)) && in_cap(g, max_abs)) out.push_back(g);
+					if(g.set(v, pow10ll(t))) {
+						if(in_cap(g, max_abs)) out.push_back(g);
+						else
+							atom_cap_rejections++;
+					} else {
+						atom_set_failures++;
+					}
 				}
 			}
 		}
@@ -286,13 +313,37 @@ struct Ctx {
 				const auto &rt= get_values(k, j, TERM);
 				for(const auto &a: lt)
 					for(const auto &b: rt) {
-						if(addf(a, b, v) && in_cap(v, max_abs)) add_unique(c, nt, v);
-						if(subf(a, b, v) && in_cap(v, max_abs)) add_unique(c, nt, v);
+						if(addf(a, b, v)) {
+							if(in_cap(v, max_abs)) add_unique(c, nt, v);
+							else
+								combine_cap_rejections++;
+						} else {
+							combine_set_failures++;
+						}
+						if(subf(a, b, v)) {
+							if(in_cap(v, max_abs)) add_unique(c, nt, v);
+							else
+								combine_cap_rejections++;
+						} else {
+							combine_set_failures++;
+						}
 					}
 				for(const auto &a: ls)
 					for(const auto &b: rt) {
-						if(addf(a, b, v) && in_cap(v, max_abs)) add_unique(c, nt, v);
-						if(subf(a, b, v) && in_cap(v, max_abs)) add_unique(c, nt, v);
+						if(addf(a, b, v)) {
+							if(in_cap(v, max_abs)) add_unique(c, nt, v);
+							else
+								combine_cap_rejections++;
+						} else {
+							combine_set_failures++;
+						}
+						if(subf(a, b, v)) {
+							if(in_cap(v, max_abs)) add_unique(c, nt, v);
+							else
+								combine_cap_rejections++;
+						} else {
+							combine_set_failures++;
+						}
 					}
 			}
 			return values[c][nt];
@@ -305,15 +356,33 @@ struct Ctx {
 				const auto &rf= get_values(k, j, FAC);
 				for(const auto &a: lf)
 					for(const auto &b: rf) {
-						if(mulf(a, b, v) && in_cap(v, max_abs)) add_unique(c, nt, v);
+						if(mulf(a, b, v)) {
+							if(in_cap(v, max_abs)) add_unique(c, nt, v);
+							else
+								combine_cap_rejections++;
+						} else {
+							combine_set_failures++;
+						}
 					}
 				for(const auto &a: lp)
 					for(const auto &b: rf) {
-						if(mulf(a, b, v) && in_cap(v, max_abs)) add_unique(c, nt, v);
+						if(mulf(a, b, v)) {
+							if(in_cap(v, max_abs)) add_unique(c, nt, v);
+							else
+								combine_cap_rejections++;
+						} else {
+							combine_set_failures++;
+						}
 					}
 				for(const auto &a: lq)
 					for(const auto &b: rf) {
-						if(mulf(a, b, v) && in_cap(v, max_abs)) add_unique(c, nt, v);
+						if(mulf(a, b, v)) {
+							if(in_cap(v, max_abs)) add_unique(c, nt, v);
+							else
+								combine_cap_rejections++;
+						} else {
+							combine_set_failures++;
+						}
 					}
 			}
 			return values[c][nt];
@@ -325,15 +394,33 @@ struct Ctx {
 			const auto &rf= get_values(k, j, FAC);
 			for(const auto &a: lf)
 				for(const auto &b: rf) {
-					if(divf(a, b, v) && in_cap(v, max_abs)) add_unique(c, nt, v);
+					if(divf(a, b, v)) {
+						if(in_cap(v, max_abs)) add_unique(c, nt, v);
+						else
+							combine_cap_rejections++;
+					} else {
+						combine_set_failures++;
+					}
 				}
 			for(const auto &a: lp)
 				for(const auto &b: rf) {
-					if(divf(a, b, v) && in_cap(v, max_abs)) add_unique(c, nt, v);
+					if(divf(a, b, v)) {
+						if(in_cap(v, max_abs)) add_unique(c, nt, v);
+						else
+							combine_cap_rejections++;
+					} else {
+						combine_set_failures++;
+					}
 				}
 			for(const auto &a: lq)
 				for(const auto &b: rf) {
-					if(divf(a, b, v) && in_cap(v, max_abs)) add_unique(c, nt, v);
+					if(divf(a, b, v)) {
+						if(in_cap(v, max_abs)) add_unique(c, nt, v);
+						else
+							combine_cap_rejections++;
+					} else {
+						combine_set_failures++;
+					}
 				}
 		}
 		return values[c][nt];
@@ -365,6 +452,10 @@ static void report_mode(const Opt &opt, char mode) {
 	cout << "root_unique_values=" << root.size() << "\n";
 	cout << "representable_integers=" << ints.size() << "\n";
 	cout << "smallest_unreachable_positive=" << smallest_missing << "\n";
+	cout << "atom_set_failures=" << ctx.atom_set_failures << "\n";
+	cout << "atom_cap_rejections=" << ctx.atom_cap_rejections << "\n";
+	cout << "combine_set_failures=" << ctx.combine_set_failures << "\n";
+	cout << "combine_cap_rejections=" << ctx.combine_cap_rejections << "\n";
 }
 
 int main(int argc, char **argv) {
